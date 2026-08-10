@@ -1,0 +1,88 @@
+name: update
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.K8V2P9M }}
+          token: ${{ secrets.PREMIUM_PAT }}
+          path: workspace
+
+      - name: setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: execute
+        run: |
+          cd workspace
+          mkdir -p db
+          
+          echo "Attempting to download latest in-progress databases..."
+          # Get the latest release from the Log Archive
+          LATEST_TAG=$(gh release view -R ${{ secrets.K8V2P9M }} --json tagName -q ".tagName" 2>/dev/null || echo "")
+          
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No in-progress database found. Bootstrapping from public archive to jumpstart!"
+            gh release download v2026-08-01-v2 -R ${{ secrets.W9J5T1Q }} --dir db --clobber
+          else
+            echo "Found latest in-progress databases ($LATEST_TAG). Downloading..."
+            gh release download "$LATEST_TAG" -R ${{ secrets.K8V2P9M }} --dir db --clobber
+          fi
+          
+          echo "Running 4-hour Scrape..."
+          npm install
+          node cli.js track-b-all 18 0 | tee action_log.txt
+          
+          # Upload back to Log Archive
+          DATE=$(date -u +"%Y-%m-%d-%H-%M")
+          NEW_TAG="v${DATE}-in-progress"
+          
+          echo "Uploading updated databases back to Log Archive ($NEW_TAG)..."
+          gh release create "$NEW_TAG" --title "In Progress: $DATE" --notes "Latest 4-hour scrape." -R ${{ secrets.K8V2P9M }} || true
+          for file in db/*; do
+            gh release upload "$NEW_TAG" "$file" --clobber -R ${{ secrets.K8V2P9M }} || true
+          done
+          gh release upload "$NEW_TAG" action_log.txt --clobber -R ${{ secrets.K8V2P9M }} || true
+          
+          # Delete the OLD release to keep the Log Archive clean (only keep the absolute latest)
+          if [ ! -z "$LATEST_TAG" ]; then
+            echo "Deleting old in-progress release ($LATEST_TAG)..."
+            gh release delete "$LATEST_TAG" -R ${{ secrets.K8V2P9M }} -y --cleanup-tag || true
+          fi
+          
+          # End of Day Vault Logic
+          HOUR=$(date -u +"%H")
+          if [ "$HOUR" == "00" ]; then
+            echo "Midnight UTC detected! The previous day is finished. Splitting DBs for the Premium Vault..."
+            node splitDb.js
+            
+            # The finalized data belongs to yesterday
+            YESTERDAY=$(date -u -d "yesterday" +"%Y-%m-%d")
+            FINAL_TAG="v${YESTERDAY}"
+            
+            echo "Pushing 6 finalized DBs to Premium Vault ($FINAL_TAG)..."
+            gh release create "$FINAL_TAG" --title "Final Vault Release: $YESTERDAY" --notes "End of day finalized databases." -R ${{ secrets.Z4L7R3X }} || true
+            gh release upload "$FINAL_TAG" db/*.db --clobber -R ${{ secrets.Z4L7R3X }}
+          fi
+
+          
+        env:
+          GH_TOKEN: ${{ secrets.PREMIUM_PAT }}
+
+      - name: cleanup
+        if: always()
+        run: |
+          gh api repos/buydin/ecosystem-actions-runner/actions/runs \
+            --paginate -q ".workflow_runs[] | select(.id != ${{ github.run_id }}) | .id" | \
+            xargs -n1 -I{} gh api -X DELETE repos/buydin/ecosystem-actions-runner/actions/runs/{} || true
+        env:
+          GH_TOKEN: ${{ secrets.PREMIUM_PAT }}
