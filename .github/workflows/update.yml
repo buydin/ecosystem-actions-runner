@@ -159,8 +159,8 @@ jobs:
           echo "Checking for completed days to push to Premium Vault..."
           TODAY=$(date -u +"%Y-%m-%d")
           
-          # Loop through every single daily DB
-          for dbfile in db/metrics_*.db; do
+          # Loop through only the core daily DBs (e.g. metrics_2026-08-09.db)
+          for dbfile in db/metrics_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].db; do
             filename=$(basename "$dbfile")
             date_str="${filename#metrics_}"
             date_str="${date_str%.db}"
@@ -173,8 +173,14 @@ jobs:
               if ! gh release view "$TAG" -R ${{ secrets.Z4L7R3X }} > /dev/null 2>&1; then
                 echo "Missing completed day found! Pushing $TAG to Premium Vault..."
                 node splitDb.js
-                gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases." -R ${{ secrets.Z4L7R3X }} || true
-                gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "$dbfile" --clobber -R ${{ secrets.Z4L7R3X }} || true
+                
+                # Generate checksums for the 7 specific databases
+                cd db
+                sha256sum EcosystemMaster.db ActiveMaps.db ArchivedMaps.db "metrics_${date_str}.db" "metrics_${date_str}_Day.db" "metrics_${date_str}_Hour.db" "metrics_${date_str}_Minute.db" > checksums.txt
+                cd ..
+                
+                gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases (7 DB Format)." -R ${{ secrets.Z4L7R3X }} || true
+                gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "db/metrics_${date_str}.db" "db/metrics_${date_str}_Day.db" "db/metrics_${date_str}_Hour.db" "db/metrics_${date_str}_Minute.db" db/checksums.txt --clobber -R ${{ secrets.Z4L7R3X }} || true
               else
                 echo "$TAG is already safely stored in the Premium Vault."
               fi
