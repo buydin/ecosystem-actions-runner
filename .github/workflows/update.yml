@@ -33,6 +33,9 @@ jobs:
           if [ -z "$LATEST_TAG" ]; then
             echo "No in-progress database found. Bootstrapping from public archive to jumpstart!"
             gh release download v2026-08-01-v2 -R ${{ secrets.W9J5T1Q }} --dir db --clobber
+            
+            # The archive contains EcosystemMaster.db, but the scraper expects it to be named maps.db
+            mv db/EcosystemMaster.db db/maps.db || true
           else
             echo "Found latest in-progress databases ($LATEST_TAG). Downloading..."
             gh release download "$LATEST_TAG" -R ${{ secrets.K8V2P9M }} --dir db --clobber
