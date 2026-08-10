@@ -155,25 +155,33 @@ jobs:
             gh release delete "$OLD_TAG" -R ${{ secrets.K8V2P9M }} -y --cleanup-tag || true
           fi
           
-          # End of Day Vault Logic
-          HOUR=$(date -u +"%H")
-          if [ "$HOUR" == "00" ]; then
-            echo "Midnight UTC detected! Splitting DBs for the Premium Vault..."
-            node splitDb.js
+          # Smart Vault Logic
+          echo "Checking for completed days to push to Premium Vault..."
+          TODAY=$(date -u +"%Y-%m-%d")
+          
+          # Loop through every single daily DB
+          for dbfile in db/metrics_*.db; do
+            filename=$(basename "$dbfile")
+            date_str="${filename#metrics_}"
+            date_str="${date_str%.db}"
             
-            # Loop through every single daily DB and create a separate release for each day!
-            for dbfile in db/metrics_*.db; do
-              filename=$(basename "$dbfile")
-              date_str="${filename#metrics_}"
-              date_str="${date_str%.db}"
-              
-              TAG="v${date_str}"
-              
-              echo "Pushing finalized DBs to Premium Vault ($TAG)..."
-              gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases." -R ${{ secrets.Z4L7R3X }} || true
-              gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "$dbfile" --clobber -R ${{ secrets.Z4L7R3X }} || true
-            done
-          fi
+            TAG="v${date_str}"
+            
+            # If the database date is in the past, the day is 100% completed
+            if [[ "$date_str" < "$TODAY" ]]; then
+              echo "Checking if $TAG is already in Premium Vault..."
+              if ! gh release view "$TAG" -R ${{ secrets.Z4L7R3X }} > /dev/null 2>&1; then
+                echo "Missing completed day found! Pushing $TAG to Premium Vault..."
+                node splitDb.js
+                gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases." -R ${{ secrets.Z4L7R3X }} || true
+                gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "$dbfile" --clobber -R ${{ secrets.Z4L7R3X }} || true
+              else
+                echo "$TAG is already safely stored in the Premium Vault."
+              fi
+            else
+              echo "$date_str is still accumulating live data. Skipping Vault push."
+            fi
+          done
         env:
           GH_TOKEN: ${{ secrets.PREMIUM_PAT }}
 
