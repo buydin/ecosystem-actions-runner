@@ -161,12 +161,18 @@ jobs:
             echo "Midnight UTC detected! Splitting DBs for the Premium Vault..."
             node splitDb.js
             
-            YESTERDAY=$(date -u -d "yesterday" +"%Y-%m-%d")
-            FINAL_TAG="v${YESTERDAY}"
-            
-            echo "Pushing 6 finalized DBs to Premium Vault ($FINAL_TAG)..."
-            gh release create "$FINAL_TAG" --title "Final Vault Release: $YESTERDAY" --notes "End of day finalized databases." -R ${{ secrets.Z4L7R3X }} || true
-            gh release upload "$FINAL_TAG" db/*.db --clobber -R ${{ secrets.Z4L7R3X }}
+            # Loop through every single daily DB and create a separate release for each day!
+            for dbfile in db/metrics_*.db; do
+              filename=$(basename "$dbfile")
+              date_str="${filename#metrics_}"
+              date_str="${date_str%.db}"
+              
+              TAG="v${date_str}"
+              
+              echo "Pushing finalized DBs to Premium Vault ($TAG)..."
+              gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases." -R ${{ secrets.Z4L7R3X }} || true
+              gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "$dbfile" --clobber -R ${{ secrets.Z4L7R3X }} || true
+            done
           fi
         env:
           GH_TOKEN: ${{ secrets.PREMIUM_PAT }}
