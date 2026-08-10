@@ -174,13 +174,8 @@ jobs:
                 echo "Missing completed day found! Pushing $TAG to Premium Vault..."
                 node splitDb.js
                 
-                # Generate checksums for the 7 specific databases
-                cd db
-                sha256sum EcosystemMaster.db ActiveMaps.db ArchivedMaps.db "metrics_${date_str}.db" "metrics_${date_str}_Day.db" "metrics_${date_str}_Hour.db" "metrics_${date_str}_Minute.db" > checksums.txt
-                cd ..
-                
                 gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases (7 DB Format)." -R ${{ secrets.Z4L7R3X }} || true
-                gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "db/metrics_${date_str}.db" "db/metrics_${date_str}_Day.db" "db/metrics_${date_str}_Hour.db" "db/metrics_${date_str}_Minute.db" db/checksums.txt --clobber -R ${{ secrets.Z4L7R3X }} || true
+                gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "db/metrics_${date_str}.db" "db/metrics_${date_str}_Day.db" "db/metrics_${date_str}_Hour.db" "db/metrics_${date_str}_Minute.db" --clobber -R ${{ secrets.Z4L7R3X }} || true
               else
                 echo "$TAG is already safely stored in the Premium Vault."
               fi
