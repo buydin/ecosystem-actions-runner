@@ -1,6 +1,8 @@
 name: update
 
 on:
+  schedule:
+    - cron: '0 */4 * * *'
   workflow_dispatch:
 
 permissions:
@@ -153,36 +155,45 @@ jobs:
             gh release delete "$OLD_TAG" -R ${{ secrets.K8V2P9M }} -y --cleanup-tag || true
           fi
           
-          # Smart Vault Logic
+          # Run splitDb ONCE before the vault loop to generate all _Day, _Hour, _Minute files
+          echo "Running splitDb to generate all Day/Hour/Minute variants..."
+          node splitDb.js
+          
+          # Smart Vault Logic: push completed days to Premium Vault
           echo "Checking for completed days to push to Premium Vault..."
           TODAY=$(date -u +"%Y-%m-%d")
           
-          # Loop through only the core daily DBs (e.g. metrics_2026-08-09.db)
           for dbfile in db/metrics_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].db; do
             filename=$(basename "$dbfile")
             date_str="${filename#metrics_}"
             date_str="${date_str%.db}"
-            
             TAG="v${date_str}"
             
-            # If the database date is in the past, the day is 100% completed
             if [[ "$date_str" < "$TODAY" ]]; then
               echo "Checking if $TAG needs to be pushed to Premium Vault..."
               
-              node splitDb.js
-              
-              # Calculate local checksum of the primary metrics DB
               LOCAL_SHA=$(sha256sum "$dbfile" | awk '{print $1}')
+              LOCAL_SIZE=$(stat -c%s "$dbfile")
               
-              # Fetch remote checksum from GitHub (if release exists)
-              REMOTE_SHA=$(gh release view "$TAG" -R ${{ secrets.Z4L7R3X }} --json assets -q ".assets[] | select(.name==\"metrics_${date_str}.db\") | .digest" 2>/dev/null | sed 's/^sha256://' || echo "missing")
+              # Check if release already exists
+              RELEASE_EXISTS=$(gh release view "$TAG" -R ${{ secrets.Z4L7R3X }} --json tagName -q ".tagName" 2>/dev/null || echo "")
               
-              if [ "$LOCAL_SHA" == "$REMOTE_SHA" ]; then
-                echo "$TAG is already safely stored in the Premium Vault and matches perfectly (Checksum: $LOCAL_SHA)."
-              else
-                echo "Checksum mismatch or missing release! Pushing updated $TAG to Premium Vault..."
-                gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases (7 DB Format)." -R ${{ secrets.Z4L7R3X }} || true
+              if [ -z "$RELEASE_EXISTS" ]; then
+                echo "No existing release for $TAG. Creating and uploading to Premium Vault..."
+                gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases (7 DB Format)." -R ${{ secrets.Z4L7R3X }}
                 gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "db/metrics_${date_str}.db" "db/metrics_${date_str}_Day.db" "db/metrics_${date_str}_Hour.db" "db/metrics_${date_str}_Minute.db" --clobber -R ${{ secrets.Z4L7R3X }} || true
+              else
+                REMOTE_SIZE=$(gh release view "$TAG" -R ${{ secrets.Z4L7R3X }} --json assets -q ".assets[] | select(.name=="metrics_${date_str}.db") | .size" 2>/dev/null || echo "0")
+                REMOTE_SHA=$(gh release view "$TAG" -R ${{ secrets.Z4L7R3X }} --json assets -q ".assets[] | select(.name=="metrics_${date_str}.db") | .digest" 2>/dev/null | sed 's/^sha256://' || echo "")
+                
+                if [ "$LOCAL_SHA" == "$REMOTE_SHA" ]; then
+                  echo "$TAG already matches Premium Vault perfectly. Skipping."
+                elif [ "$REMOTE_SIZE" -gt "0" ] && [ "$LOCAL_SIZE" -lt "$REMOTE_SIZE" ]; then
+                  echo "DANGER: Local DB ($LOCAL_SIZE bytes) is SMALLER than Vault DB ($REMOTE_SIZE bytes)! Aborting to protect historical data!"
+                else
+                  echo "Local DB is larger/newer. Overwriting $TAG in Premium Vault..."
+                  gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "db/metrics_${date_str}.db" "db/metrics_${date_str}_Day.db" "db/metrics_${date_str}_Hour.db" "db/metrics_${date_str}_Minute.db" --clobber -R ${{ secrets.Z4L7R3X }} || true
+                fi
               fi
             else
               echo "$date_str is still accumulating live data. Skipping Vault push."

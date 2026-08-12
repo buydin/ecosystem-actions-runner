@@ -81,6 +81,10 @@ jobs:
           path: workspace/db
 
       - name: Execute Track B Swarm
+        env:
+          SCRAPE_MODE: oneoff
+          SCRAPE_FROM: "2026-08-10T00:00:00.000Z"
+          SCRAPE_TO: "2026-08-13T00:00:00.000Z"
         run: |
           cd workspace
           npm ci || npm install
