@@ -174,15 +174,27 @@ jobs:
               # Calculate local checksum of the primary metrics DB
               LOCAL_SHA=$(sha256sum "$dbfile" | awk '{print $1}')
               
-              # Fetch remote checksum from GitHub (if release exists)
-              REMOTE_SHA=$(gh release view "$TAG" -R ${{ secrets.Z4L7R3X }} --json assets -q ".assets[] | select(.name==\"metrics_${date_str}.db\") | .digest" 2>/dev/null | sed 's/^sha256://' || echo "missing")
+              # Fetch remote checksum and size from GitHub (if release exists)
+              REMOTE_JSON=$(gh release view "$TAG" -R ${{ secrets.Z4L7R3X }} --json assets -q ".assets[] | select(.name==\"metrics_${date_str}.db\")" 2>/dev/null || echo "missing")
               
-              if [ "$LOCAL_SHA" == "$REMOTE_SHA" ]; then
-                echo "$TAG is already safely stored in the Premium Vault and matches perfectly (Checksum: $LOCAL_SHA)."
-              else
-                echo "Checksum mismatch or missing release! Pushing updated $TAG to Premium Vault..."
+              if [ "$REMOTE_JSON" == "missing" ]; then
+                echo "Missing release found! Pushing $TAG to Premium Vault..."
                 gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases (7 DB Format)." -R ${{ secrets.Z4L7R3X }} || true
                 gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "db/metrics_${date_str}.db" "db/metrics_${date_str}_Day.db" "db/metrics_${date_str}_Hour.db" "db/metrics_${date_str}_Minute.db" --clobber -R ${{ secrets.Z4L7R3X }} || true
+              else
+                REMOTE_SHA=$(echo "$REMOTE_JSON" | jq -r '.digest' | sed 's/^sha256://')
+                REMOTE_SIZE=$(echo "$REMOTE_JSON" | jq -r '.size')
+                LOCAL_SIZE=$(stat -c%s "$dbfile")
+                
+                if [ "$LOCAL_SHA" == "$REMOTE_SHA" ]; then
+                  echo "$TAG is already safely stored in the Premium Vault and matches perfectly (Checksum: $LOCAL_SHA)."
+                elif [ "$LOCAL_SIZE" -lt "$REMOTE_SIZE" ]; then
+                  echo "DANGER: Local database ($LOCAL_SIZE bytes) is SMALLER than Remote Vault database ($REMOTE_SIZE bytes)! Aborting overwrite to protect historical data!"
+                else
+                  echo "Checksum mismatch and local DB is larger/better! Overwriting $TAG in Premium Vault..."
+                  gh release create "$TAG" --title "Final Vault Release: $date_str" --notes "End of day finalized databases (7 DB Format)." -R ${{ secrets.Z4L7R3X }} || true
+                  gh release upload "$TAG" db/EcosystemMaster.db db/ActiveMaps.db db/ArchivedMaps.db "db/metrics_${date_str}.db" "db/metrics_${date_str}_Day.db" "db/metrics_${date_str}_Hour.db" "db/metrics_${date_str}_Minute.db" --clobber -R ${{ secrets.Z4L7R3X }} || true
+                fi
               fi
             else
               echo "$date_str is still accumulating live data. Skipping Vault push."
