@@ -136,9 +136,6 @@ jobs:
           echo "Merging 18 shards..."
           node mergeShards.js
           
-          # Find old tag before we create the new one
-          OLD_TAG=$(gh release view -R ${{ secrets.K8V2P9M }} --json tagName -q ".tagName" 2>/dev/null || echo "")
-          
           # Upload back to Log Archive
           DATE=$(date -u +"%Y-%m-%d-%H-%M")
           NEW_TAG="v${DATE}-in-progress"
@@ -148,12 +145,6 @@ jobs:
           for file in db/*; do
             gh release upload "$NEW_TAG" "$file" --clobber -R ${{ secrets.K8V2P9M }} || true
           done
-          
-          # Delete the OLD release to keep the Log Archive clean
-          if [ ! -z "$OLD_TAG" ] && [ "$OLD_TAG" != "$NEW_TAG" ]; then
-            echo "Deleting old in-progress release ($OLD_TAG)..."
-            gh release delete "$OLD_TAG" -R ${{ secrets.K8V2P9M }} -y --cleanup-tag || true
-          fi
           
           # Run splitDb ONCE before the vault loop to generate all _Day, _Hour, _Minute files
           echo "Running splitDb to generate all Day/Hour/Minute variants..."
